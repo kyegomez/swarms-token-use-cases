@@ -1,30 +1,82 @@
-name: Linting and Formatting
+name: desktop
 
 on:
   push:
+    tags:
+      - "v*.*.*"  # Semantic versioning
     branches:
-      - main
+      - 'main'
+    paths:
+      - src/interface/desktop/**
+      - .github/workflows/desktop.yml
 
 jobs:
-  lint_and_format:
+  build_and_test:
+    name: 🖥️ Build, Test, and Release Desktop App
     runs-on: ubuntu-latest
-
+    env:
+      TODESKTOP_ACCESS_TOKEN: ${{ secrets.TODESKTOP_ACCESS_TOKEN }}
+      TODESKTOP_EMAIL: ${{ secrets.TODESKTOP_EMAIL }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: src/interface/desktop
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # Checkout code
+      - name: ⬇️ Checkout Code
+        uses: actions/checkout@v3
         with:
-          python-version: '3.10'
+          fetch-depth: 0
 
-      - name: Install dependencies
-        run: pip install --no-cache-dir -r requirements.txt
-
-      - name: Find Python files
-        run: find swarms_torch -name "*.py" -type f -exec autopep8 --in-place --aggressive --aggressive {} +
-
-      - name: Push changes
-        uses: ad-m/github-push-action@master
+      # Install Node.js
+      - name: ⤵️ Install Node
+        uses: actions/setup-node@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          node-version: "lts/*"
+
+      # Code Quality Check
+      - name: 🔍 Run Code Linting
+        run: |
+          npm install eslint
+          npx eslint . --ext .js,.jsx,.ts,.tsx --max-warnings 0
+
+      # Setup Build Environment
+      - name: ⚙️ Setup Desktop Build
+        run: |
+          yarn
+          npm install -g @todesktop/cli
+          sed -i "s/\"id\": \"\"/\"id\": \"${{ secrets.TODESKTOP_ID }}\"/g" todesktop.json
+
+      # Build App
+      - name: ⚙️ Build Desktop App
+        run: |
+          npx todesktop build
+
+      # Platform-Specific Validations
+      - name: ✅ Validate Linux Build
+        if: matrix.os == 'linux'
+        run: |
+          file dist/*.AppImage | grep "AppImage"
+
+      - name: ✅ Validate MacOS Build
+        if: matrix.os == 'macos'
+        run: |
+          file dist/*.dmg | grep "Disk image"
+
+      - name: ✅ Validate Windows Build
+        if: matrix.os == 'windows'
+        run: |
+          file dist/*.exe | grep "PE32"
+
+      # Upload artifacts for testing
+      - name: ⏫ Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: desktop-build-${{ github.ref_name }}
+          path: dist/
+
+      # Release App
+      - name: 📦 Release Desktop App
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          npx todesktop release --latest --force
